@@ -311,3 +311,110 @@
     )
   )
 )
+
+(define-public (withdraw-stake (amount uint))
+  ;; Withdraw staked tokens with governance power adjustment
+  (let (
+      (caller tx-sender)
+      (member-data (unwrap! (map-get? members caller) ERR-NOT-MEMBER))
+      (current-stake (get stake member-data))
+    )
+    (asserts! (is-member caller) ERR-NOT-MEMBER)
+    (asserts! (> amount u0) ERR-INVALID-AMOUNT)
+    (asserts! (>= current-stake amount) ERR-INSUFFICIENT-FUNDS)
+
+    (try! (as-contract (stx-transfer? amount tx-sender caller)))
+
+    (let (
+        (new-stake (- current-stake amount))
+        (updated-member (merge member-data {
+          stake: new-stake,
+          last-interaction: stacks-block-height,
+        }))
+      )
+      (map-set members caller updated-member)
+      (var-set treasury-balance (- (var-get treasury-balance) amount))
+      (ok new-stake)
+    )
+  )
+)
+
+;; PROPOSAL CREATION & MANAGEMENT
+
+(define-public (create-governance-proposal
+    (title (string-ascii 50))
+    (description (string-utf8 500))
+    (amount uint)
+    (category (string-ascii 20))
+  )
+  ;; Creates a new governance proposal with enhanced metadata
+  (let (
+      (caller tx-sender)
+      (proposal-id (+ (var-get total-proposals) u1))
+      (member-data (unwrap! (map-get? members caller) ERR-NOT-MEMBER))
+    )
+    (asserts! (is-member caller) ERR-NOT-MEMBER)
+    (asserts! (>= (var-get treasury-balance) amount) ERR-INSUFFICIENT-FUNDS)
+    (asserts! (> (len title) u0) ERR-INVALID-PROPOSAL)
+    (asserts! (> (len description) u0) ERR-INVALID-PROPOSAL)
+
+    (map-set proposals proposal-id {
+      creator: caller,
+      title: title,
+      description: description,
+      amount: amount,
+      yes-votes: u0,
+      no-votes: u0,
+      status: "active",
+      created-at: stacks-block-height,
+      expires-at: (+ stacks-block-height PROPOSAL-DURATION),
+      execution-threshold: (/ (var-get total-members) u2),
+      category: category,
+    })
+
+    ;; Update member statistics
+    (let ((updated-member (merge member-data {
+        proposals-created: (+ (get proposals-created member-data) u1),
+        last-interaction: stacks-block-height,
+      })))
+      (map-set members caller updated-member)
+    )
+
+    (var-set total-proposals proposal-id)
+    (try! (update-member-reputation caller 2))
+    (ok proposal-id)
+  )
+)
+
+;; VOTING SYSTEM & CONSENSUS MECHANISM
+
+(define-public (cast-governance-vote
+    (proposal-id uint)
+    (vote-choice bool)
+  )
+  ;; Casts a weighted vote on governance proposals with full audit trail
+  (let (
+      (caller tx-sender)
+      (voting-power (calculate-voting-power caller))
+      (proposal (unwrap! (map-get? proposals proposal-id) ERR-INVALID-PROPOSAL))
+      (member-data (unwrap! (map-get? members caller) ERR-NOT-MEMBER))
+    )
+    (asserts! (is-member caller) ERR-NOT-MEMBER)
+    (asserts! (is-active-proposal proposal-id) ERR-PROPOSAL-EXPIRED)
+    (asserts!
+      (is-none (map-get? votes {
+        proposal-id: proposal-id,
+        voter: caller,
+      }))
+      ERR-ALREADY-VOTED
+    )
+
+    ;; Record vote with comprehensive data
+    (map-set votes {
+      proposal-id: proposal-id,
+      voter: caller,
+    } {
+      vote-choice: vote-choice,
+      voting-power: voting-power,
+      timestamp: stacks-block-height,
+    })
