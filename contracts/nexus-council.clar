@@ -620,3 +620,61 @@
     (ok "Collaboration partnership established successfully!")
   )
 )
+
+;; INFORMATION RETRIEVAL & SYSTEM QUERIES
+
+(define-read-only (get-proposal-details (proposal-id uint))
+  ;; Retrieves comprehensive proposal information with voting statistics
+  (let ((proposal (unwrap! (map-get? proposals proposal-id) ERR-INVALID-PROPOSAL)))
+    (ok {
+      proposal-data: proposal,
+      vote-summary: {
+        total-votes: (+ (get yes-votes proposal) (get no-votes proposal)),
+        approval-rate: (if (> (+ (get yes-votes proposal) (get no-votes proposal)) u0)
+          (/ (* (get yes-votes proposal) u100)
+            (+ (get yes-votes proposal) (get no-votes proposal))
+          )
+          u0
+        ),
+        time-remaining: (if (> (get expires-at proposal) stacks-block-height)
+          (- (get expires-at proposal) stacks-block-height)
+          u0
+        ),
+      },
+    })
+  )
+)
+
+(define-read-only (get-system-statistics)
+  ;; Returns comprehensive system health and participation metrics
+  (ok {
+    total-members: (var-get total-members),
+    total-proposals: (var-get total-proposals),
+    total-collaborations: (var-get total-collaborations),
+    treasury-balance: (var-get treasury-balance),
+    system-health: (if (> (var-get total-members) u100)
+      "Thriving"
+      (if (> (var-get total-members) u50)
+        "Growing"
+        "Developing"
+      )
+    ),
+    governance-activity: "High", ;; Could be calculated based on recent proposals
+  })
+)
+
+(define-read-only (get-collaboration-status (collaboration-id uint))
+  ;; Retrieves detailed collaboration information and status
+  (ok (unwrap! (map-get? collaborations collaboration-id) ERR-COLLABORATION-NOT-FOUND))
+)
+
+;; SYSTEM INITIALIZATION & CONFIGURATION
+
+;; Initialize system state variables
+(begin
+  (var-set total-members u0)
+  (var-set total-proposals u0)
+  (var-set total-collaborations u0)
+  (var-set treasury-balance u0)
+  (var-set contract-initialized true)
+)
