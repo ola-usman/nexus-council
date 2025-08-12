@@ -418,3 +418,106 @@
       voting-power: voting-power,
       timestamp: stacks-block-height,
     })
+
+    ;; Update proposal vote tallies
+    (if vote-choice
+      (map-set proposals proposal-id
+        (merge proposal { yes-votes: (+ (get yes-votes proposal) voting-power) })
+      )
+      (map-set proposals proposal-id
+        (merge proposal { no-votes: (+ (get no-votes proposal) voting-power) })
+      )
+    )
+
+    ;; Update member participation metrics
+    (let ((updated-member (merge member-data {
+        votes-cast: (+ (get votes-cast member-data) u1),
+        last-interaction: stacks-block-height,
+      })))
+      (map-set members caller updated-member)
+    )
+
+    (try! (update-member-reputation caller 1))
+    (ok voting-power)
+  )
+)
+
+;; PROPOSAL EXECUTION & FUND DISTRIBUTION
+
+(define-public (execute-approved-proposal (proposal-id uint))
+  ;; Executes proposals that meet consensus requirements
+  (let (
+      (caller tx-sender)
+      (proposal (unwrap! (map-get? proposals proposal-id) ERR-INVALID-PROPOSAL))
+    )
+    (asserts! (is-member caller) ERR-NOT-MEMBER)
+    (asserts! (>= stacks-block-height (get expires-at proposal))
+      ERR-VOTING-PERIOD_ACTIVE
+    )
+    (asserts! (is-eq (get status proposal) "active") ERR-INVALID-PROPOSAL)
+
+    (let (
+        (yes-votes (get yes-votes proposal))
+        (no-votes (get no-votes proposal))
+        (amount (get amount proposal))
+        (creator (get creator proposal))
+      )
+      (if (and (> yes-votes no-votes) (> yes-votes (get execution-threshold proposal)))
+        (begin
+          ;; Execute successful proposal
+          (try! (as-contract (stx-transfer? amount tx-sender creator)))
+          (var-set treasury-balance (- (var-get treasury-balance) amount))
+          (map-set proposals proposal-id (merge proposal { status: "executed" }))
+          (try! (update-member-reputation creator 5))
+
+          ;; Update creator analytics
+          (match (map-get? member-analytics creator)
+            analytics (map-set member-analytics creator
+              (merge analytics { successful-proposals: (+ (get successful-proposals analytics) u1) })
+            )
+            true
+          )
+          (ok "Proposal executed successfully!")
+        )
+        (begin
+          ;; Reject failed proposal
+          (map-set proposals proposal-id (merge proposal { status: "rejected" }))
+          (ok "Proposal rejected by community vote.")
+        )
+      )
+    )
+  )
+)
+
+;; TREASURY OPERATIONS & FINANCIAL MANAGEMENT
+
+(define-read-only (get-treasury-status)
+  ;; Returns comprehensive treasury information
+  (ok {
+    balance: (var-get treasury-balance),
+    total-members: (var-get total-members),
+    active-proposals: (var-get total-proposals),
+    avg-stake-per-member: (if (> (var-get total-members) u0)
+      (/ (var-get treasury-balance) (var-get total-members))
+      u0
+    ),
+  })
+)
+
+(define-public (contribute-to-treasury (amount uint))
+  ;; Make charitable contributions to strengthen the treasury
+  (let ((caller tx-sender))
+    (asserts! (> amount u0) ERR-INVALID-AMOUNT)
+    (try! (stx-transfer? amount caller (as-contract tx-sender)))
+    (var-set treasury-balance (+ (var-get treasury-balance) amount))
+
+    ;; Reward contributors with reputation boost
+    (if (is-member caller)
+      (begin
+        (try! (update-member-reputation caller 3))
+        (ok "Thank you for strengthening our community treasury!")
+      )
+      (ok "Contribution received! Consider joining our governance council!")
+    )
+  )
+)
