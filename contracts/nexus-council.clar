@@ -97,3 +97,102 @@
     category: (string-ascii 20), ;; Proposal category/type
   }
 )
+
+;; Individual Vote Tracking & Audit Trail
+(define-map votes
+  {
+    proposal-id: uint,
+    voter: principal,
+  }
+  {
+    vote-choice: bool, ;; True for yes, false for no
+    voting-power: uint, ;; Voting power at time of vote
+    timestamp: uint, ;; Block height when vote was cast
+  }
+)
+
+;; Inter-Organization Collaboration Framework
+(define-map collaborations
+  uint
+  {
+    partner-dao: principal, ;; Partner organization address
+    proposal-id: uint, ;; Associated proposal ID
+    status: (string-ascii 15), ;; Collaboration status
+    created-at: uint, ;; Creation timestamp
+    terms: (string-utf8 200), ;; Collaboration terms
+    mutual-benefit: uint, ;; Expected mutual benefit score
+  }
+)
+
+;; Advanced Member Metrics & Analytics
+(define-map member-analytics
+  principal
+  {
+    total-stake-time: uint, ;; Cumulative staking duration
+    successful-proposals: uint, ;; Number of executed proposals
+    collaboration-count: uint, ;; Cross-DAO collaborations initiated
+    reputation-history: uint, ;; Historical reputation peak
+    governance-participation: uint, ;; Participation rate percentage
+  }
+)
+
+;; INTERNAL UTILITY FUNCTIONS
+
+;; Member Validation & Status Checking
+(define-private (is-member (user principal))
+  ;; Validates if a principal is an active member of the organization
+  (match (map-get? members user)
+    member-data
+    true
+    false
+  )
+)
+
+;; Proposal Lifecycle Management
+(define-private (is-active-proposal (proposal-id uint))
+  ;; Determines if a proposal is currently active and accepting votes
+  (match (map-get? proposals proposal-id)
+    proposal (and
+      (< stacks-block-height (get expires-at proposal))
+      (is-eq (get status proposal) "active")
+    )
+    false
+  )
+)
+
+(define-private (is-valid-proposal-id (proposal-id uint))
+  ;; Validates proposal existence in the system
+  (match (map-get? proposals proposal-id)
+    proposal
+    true
+    false
+  )
+)
+
+;; Collaboration System Validation
+(define-private (is-valid-collaboration-id (collaboration-id uint))
+  ;; Validates collaboration record existence
+  (match (map-get? collaborations collaboration-id)
+    collaboration
+    true
+    false
+  )
+)
+
+;; Advanced Voting Power Calculation Algorithm
+(define-private (calculate-voting-power (user principal))
+  ;; Calculates weighted voting power based on reputation and stake
+  (let (
+      (member-data (unwrap! (map-get? members user) u0))
+      (reputation (get reputation member-data))
+      (stake (get stake member-data))
+      (base-power (* reputation REPUTATION-MULTIPLIER))
+      (stake-bonus stake)
+      (participation-multiplier (if (> (get votes-cast member-data) u10)
+        u2
+        u1
+      ))
+    )
+    (* (+ base-power stake-bonus) participation-multiplier)
+  )
+)
