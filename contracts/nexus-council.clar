@@ -196,3 +196,118 @@
     (* (+ base-power stake-bonus) participation-multiplier)
   )
 )
+
+;; Reputation Management & Adjustment System
+(define-private (update-member-reputation
+    (user principal)
+    (change int)
+  )
+  ;; Updates member reputation with comprehensive data tracking
+  (match (map-get? members user)
+    member-data (let (
+        (current-reputation (get reputation member-data))
+        (new-reputation-int (+ (to-int current-reputation) change))
+        (new-reputation (if (> new-reputation-int 0)
+          (to-uint new-reputation-int)
+          u1
+        ))
+        ;; Ensure minimum reputation of 1
+        (updated-data (merge member-data {
+          reputation: new-reputation,
+          last-interaction: stacks-block-height,
+        }))
+      )
+      (map-set members user updated-data)
+      (ok new-reputation)
+    )
+    ERR-NOT-MEMBER
+  )
+)
+
+;; Treasury Security & Balance Validation
+(define-private (validate-treasury-operation (amount uint))
+  ;; Validates treasury operations and balance sufficiency
+  (and
+    (> amount u0)
+    (>= (var-get treasury-balance) amount)
+  )
+)
+
+;; MEMBERSHIP MANAGEMENT SYSTEM
+
+(define-public (join-nexus-council)
+  ;; Initiates membership in the Nexus Council governance system
+  (let ((caller tx-sender))
+    (asserts! (not (is-member caller)) ERR-ALREADY-MEMBER)
+    (map-set members caller {
+      reputation: u1,
+      stake: u0,
+      last-interaction: stacks-block-height,
+      proposals-created: u0,
+      votes-cast: u0,
+      collaboration-score: u0,
+    })
+    (map-set member-analytics caller {
+      total-stake-time: u0,
+      successful-proposals: u0,
+      collaboration-count: u0,
+      reputation-history: u1,
+      governance-participation: u0,
+    })
+    (var-set total-members (+ (var-get total-members) u1))
+    (ok "Welcome to Nexus Council! Your governance journey begins now.")
+  )
+)
+
+(define-public (exit-council)
+  ;; Gracefully exits the council with stake return if applicable
+  (let (
+      (caller tx-sender)
+      (member-data (unwrap! (map-get? members caller) ERR-NOT-MEMBER))
+      (staked-amount (get stake member-data))
+    )
+    (asserts! (is-member caller) ERR-NOT-MEMBER)
+
+    ;; Return staked tokens if any
+    (if (> staked-amount u0)
+      (begin
+        (try! (as-contract (stx-transfer? staked-amount tx-sender caller)))
+        (var-set treasury-balance (- (var-get treasury-balance) staked-amount))
+      )
+      true
+    )
+
+    (map-delete members caller)
+    (map-delete member-analytics caller)
+    (var-set total-members (- (var-get total-members) u1))
+    (ok "Thank you for your participation in Nexus Council!")
+  )
+)
+
+;; STAKING & ECONOMIC PARTICIPATION
+
+(define-public (stake-for-influence (amount uint))
+  ;; Stake tokens to increase voting power and governance influence
+  (let (
+      (caller tx-sender)
+      (member-data (unwrap! (map-get? members caller) ERR-NOT-MEMBER))
+    )
+    (asserts! (is-member caller) ERR-NOT-MEMBER)
+    (asserts! (> amount u0) ERR-INVALID-AMOUNT)
+
+    (try! (stx-transfer? amount caller (as-contract tx-sender)))
+
+    (let (
+        (new-stake (+ (get stake member-data) amount))
+        (updated-member (merge member-data {
+          stake: new-stake,
+          last-interaction: stacks-block-height,
+        }))
+      )
+      (map-set members caller updated-member)
+      (var-set treasury-balance (+ (var-get treasury-balance) amount))
+      (try! (update-member-reputation caller 1))
+      (ok new-stake)
+    )
+  )
+)
